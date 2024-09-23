@@ -83,7 +83,7 @@ App::App()
   image = context->createImage(etna::Image::CreateInfo{
      .extent = {resolution.x, resolution.y, 1},
      .name = "ls1",
-     .format = vk::Format::eR8G8B8A8Unorm, // unsigned normalized format  // eR8G8B8A8Srgb - unsigned normalized format - each component stored with sRGB nonlinear encoding
+     .format = vk::Format::eR8G8B8A8Snorm, // signed normalized format  // eR8G8B8A8Srgb - unsigned normalized format - each component stored with sRGB nonlinear encoding
      .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
   });  
 }
