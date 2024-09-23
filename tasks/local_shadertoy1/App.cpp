@@ -4,7 +4,6 @@
 #include <etna/GlobalContext.hpp>
 #include <etna/PipelineManager.hpp>
 
-
 App::App()
   : resolution{1280, 720}
   , useVsync{true}
@@ -84,9 +83,9 @@ App::App()
   image = context->createImage(etna::Image::CreateInfo{
      .extent = {resolution.x, resolution.y, 1},
      .name = "ls1",
-     .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc
-  });
-  
+     .format = vk::Format::eR8G8B8A8Unorm, // unsigned normalized format  // eR8G8B8A8Srgb - unsigned normalized format - each component stored with sRGB nonlinear encoding
+     .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+  });  
 }
 
 App::~App()
@@ -151,7 +150,45 @@ void App::drawFrame()
 
 
       // TODO: Record your commands here!
-    
+
+      //Bind image in a shader  
+      auto ls1ComputeInfo = etna::get_shader_program("ls1_compute");
+      auto set = etna::create_descriptor_set(
+          ls1ComputeInfo.getDescriptorLayoutId(0),
+          currentCmdBuf,
+          {
+             etna::Binding{0, image.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)}
+          });
+      vk::DescriptorSet vkSet = set.getVkSet();
+      currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
+      currentCmdBuf.bindDescriptorSets( vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+      etna::flush_barriers(currentCmdBuf);
+      //run it with enough threads
+      currentCmdBuf.dispatch(resolution.x / 32 + 1, resolution.y / 32 + 1, 1);
+
+      etna::set_state(
+        currentCmdBuf,
+        image.get(),
+        vk::PipelineStageFlagBits2::eTransfer,
+        vk::AccessFlagBits2::eTransferRead,
+        vk::ImageLayout::eTransferSrcOptimal,
+        vk::ImageAspectFlagBits::eColor);
+      etna::flush_barriers(currentCmdBuf);
+
+      //Make a blit from your new image into a swap chain image
+
+      auto x = static_cast<int32_t>(resolution.x);
+      auto y = static_cast<int32_t>(resolution.y);
+      vk::Offset3D Off{ x, y, 1 };
+      vk::Offset3D Origin{ 0, 0, 0 };
+
+      vk::ImageBlit Blit{
+        /*Src*/ {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        std::array{Origin, Off},
+        /*Dst*/ {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        std::array{Origin, Off}
+      };
+      currentCmdBuf.blitImage(image.get(), vk::ImageLayout::eTransferSrcOptimal, backbuffer, vk::ImageLayout::eTransferDstOptimal, Blit, vk::Filter::eLinear);
 
       // At the end of "rendering", we are required to change how the pixels of the
       // swpchain image are laid out in memory to something that is appropriate

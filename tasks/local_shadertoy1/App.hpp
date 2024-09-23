@@ -8,6 +8,7 @@
 #include "wsi/OsWindowingManager.hpp"
 
 #include <etna/GlobalContext.hpp>
+#include <etna/Sampler.hpp>
 
 class App
 {
@@ -33,4 +34,5 @@ private:
   etna::Image image;
   etna::GlobalContext* context;
   etna::ComputePipeline pipeline;
+  etna::Sampler defaultSampler;
 };
