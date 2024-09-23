@@ -72,9 +72,21 @@ App::App()
   // Next, we need a magical Etna helper to send commands to the GPU.
   // How it is actually performed is not trivial, but we can skip this for now.
   commandManager = etna::get_context().createPerFrameCmdMgr();
+  context = &etna::get_context();
 
 
   // TODO: Initialize any additional resources you require here!
+  
+  //Load the shader toy.com and create a compute pipeline to run it.
+  etna::create_program("ls1_compute", {LOCAL_SHADERTOY_SHADERS_ROOT "toy.comp.spv"});
+  pipeline = context->getPipelineManager().createComputePipeline("ls1_compute", {});
+  //Create a new image to record the shader result.
+  image = context->createImage(etna::Image::CreateInfo{
+     .extent = {resolution.x, resolution.y, 1},
+     .name = "ls1",
+     .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc
+  });
+  
 }
 
 App::~App()
@@ -139,7 +151,7 @@ void App::drawFrame()
 
 
       // TODO: Record your commands here!
-
+    
 
       // At the end of "rendering", we are required to change how the pixels of the
       // swpchain image are laid out in memory to something that is appropriate

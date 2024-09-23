@@ -7,6 +7,7 @@
 
 #include "wsi/OsWindowingManager.hpp"
 
+#include <etna/GlobalContext.hpp>
 
 class App
 {
@@ -28,4 +29,8 @@ private:
 
   std::unique_ptr<etna::Window> vkWindow;
   std::unique_ptr<etna::PerFrameCmdMgr> commandManager;
+
+  etna::Image image;
+  etna::GlobalContext* context;
+  etna::ComputePipeline pipeline;
 };
