@@ -3,10 +3,12 @@
 #include <etna/Etna.hpp>
 #include <etna/GlobalContext.hpp>
 #include <etna/PipelineManager.hpp>
+#include <chrono>
 
 App::App()
   : resolution{1280, 720}
   , useVsync{true}
+  , timer{}
 {
   // First, we need to initialize Vulkan, which is not trivial because
   // extensions are required for just about anything.
@@ -36,6 +38,7 @@ App::App()
       .physicalDeviceIndexOverride = {},
       .numFramesInFlight = 1,
     });
+    
   }
 
   // Now we can create an OS window
@@ -86,6 +89,7 @@ App::App()
      .format = vk::Format::eR8G8B8A8Snorm, // signed normalized format  // eR8G8B8A8Srgb - unsigned normalized format - each component stored with sRGB nonlinear encoding
      .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
   });  
+  timer = std::chrono::system_clock::now();
 }
 
 App::~App()
@@ -162,8 +166,14 @@ void App::drawFrame()
       vk::DescriptorSet vkSet = set.getVkSet();
       currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
       currentCmdBuf.bindDescriptorSets( vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+
+      auto curr_time = std::chrono::system_clock::now();
+	  float t = std::chrono::duration<float>(curr_time - timer).count();	
+			
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(t), &t);
+
       etna::flush_barriers(currentCmdBuf);
-      //run it with enough threads
+      
       currentCmdBuf.dispatch(resolution.x / 32 + 1, resolution.y / 32 + 1, 1);
 
       etna::set_state(

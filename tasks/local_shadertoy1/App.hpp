@@ -27,6 +27,7 @@ private:
 
   glm::uvec2 resolution;
   bool useVsync;
+  std::chrono::system_clock::time_point timer;
 
   std::unique_ptr<etna::Window> vkWindow;
   std::unique_ptr<etna::PerFrameCmdMgr> commandManager;
