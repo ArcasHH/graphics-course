@@ -86,7 +86,7 @@ App::App()
   image = context->createImage(etna::Image::CreateInfo{
      .extent = {resolution.x, resolution.y, 1},
      .name = "ls1",
-     .format = vk::Format::eR8G8B8A8Snorm, // signed normalized format  // eR8G8B8A8Srgb - unsigned normalized format - each component stored with sRGB nonlinear encoding
+     .format = vk::Format::eR8G8B8A8Snorm, // signed normalized format 
      .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
   });  
   timer = std::chrono::system_clock::now();
@@ -110,6 +110,7 @@ void App::run()
   // all resources and closing the application.
   ETNA_CHECK_VK_RESULT(etna::get_context().getDevice().waitIdle());
 }
+
 
 void App::drawFrame()
 {
@@ -167,10 +168,13 @@ void App::drawFrame()
       currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
       currentCmdBuf.bindDescriptorSets( vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
 
+
       auto curr_time = std::chrono::system_clock::now();
-	  float t = std::chrono::duration<float>(curr_time - timer).count();	
-			
+      float t = std::chrono::duration<float>(curr_time - timer).count();// time from start
+	  glm::vec2 mouse =  osWindow.get()->mouse.freePos;	
       currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(t), &t);
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 8, sizeof(resolution), &resolution);
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 16, sizeof(mouse), &mouse);
 
       etna::flush_barriers(currentCmdBuf);
       
@@ -193,9 +197,9 @@ void App::drawFrame()
       vk::Offset3D Origin{ 0, 0, 0 };
 
       vk::ImageBlit Blit{
-        /*Src*/ {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
         std::array{Origin, Off},
-        /*Dst*/ {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
         std::array{Origin, Off}
       };
       currentCmdBuf.blitImage(image.get(), vk::ImageLayout::eTransferSrcOptimal, backbuffer, vk::ImageLayout::eTransferDstOptimal, Blit, vk::Filter::eLinear);
