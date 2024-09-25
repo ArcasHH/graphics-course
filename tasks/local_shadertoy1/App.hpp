@@ -20,6 +20,7 @@ public:
 
 private:
   void drawFrame();
+  void processInput();
 
 private:
   OsWindowingManager windowing;
@@ -28,6 +29,7 @@ private:
   glm::uvec2 resolution;
   bool useVsync;
   std::chrono::system_clock::time_point timer;
+  glm::vec2 mouse;
 
   std::unique_ptr<etna::Window> vkWindow;
   std::unique_ptr<etna::PerFrameCmdMgr> commandManager;

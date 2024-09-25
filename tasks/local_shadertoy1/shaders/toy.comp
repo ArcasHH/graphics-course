@@ -233,9 +233,9 @@ void main()
 
   vec3 color = render(ro, rd);
  
-  if (iuv.x < iResolution.x && iuv.y < iResolution.y) {
-    imageStore(resultImage, iuv, vec4(color, 1));
-  }
+
+  imageStore(resultImage, iuv, vec4(color, 1));
+  
 }
 
 

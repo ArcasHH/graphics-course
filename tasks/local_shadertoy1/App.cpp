@@ -9,6 +9,7 @@ App::App()
   : resolution{1280, 720}
   , useVsync{true}
   , timer{}
+  , mouse{}
 {
   // First, we need to initialize Vulkan, which is not trivial because
   // extensions are required for just about anything.
@@ -86,7 +87,7 @@ App::App()
   image = context->createImage(etna::Image::CreateInfo{
      .extent = {resolution.x, resolution.y, 1},
      .name = "ls1",
-     .format = vk::Format::eR8G8B8A8Snorm, // signed normalized format 
+     .format = vk::Format::eR8G8B8A8Unorm, // unsigned normalized format 
      .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
   });  
   timer = std::chrono::system_clock::now();
@@ -102,7 +103,7 @@ void App::run()
   while (!osWindow->isBeingClosed())
   {
     windowing.poll();
-
+    processInput();
     drawFrame();
   }
 
@@ -110,7 +111,34 @@ void App::run()
   // all resources and closing the application.
   ETNA_CHECK_VK_RESULT(etna::get_context().getDevice().waitIdle());
 }
-
+void App::processInput()
+{
+    // press RMB to restart shader
+    if (osWindow.get()->mouse[MouseButton::mbRight] == ButtonState::Rising )
+    {
+        const int retval = std::system("cd " GRAPHICS_COURSE_ROOT "/build"
+                                            " && cmake --build . --target local_shadertoy_shaders");
+        if (retval != 0)
+            spdlog::warn("Shader recompilation returned a non-zero return code!");
+        else
+        {
+            ETNA_CHECK_VK_RESULT(etna::get_context().getDevice().waitIdle());
+            etna::reload_shaders();
+            spdlog::info("Successfully reloaded shaders!");
+        }
+        timer = std::chrono::system_clock::now();
+    }
+    // press esc to close window   
+    if (osWindow.get()->keyboard[KeyboardKey::kEscape] == ButtonState::Falling) 
+    {
+        osWindow.get()->askToClose();
+    }
+    // hold LBM to rotate camera
+    if (osWindow.get()->mouse[MouseButton::mbLeft] == ButtonState::High )
+    {
+        mouse = osWindow.get()->mouse.freePos;
+    }	
+}
 
 void App::drawFrame()
 {
@@ -168,10 +196,9 @@ void App::drawFrame()
       currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
       currentCmdBuf.bindDescriptorSets( vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
 
-
       auto curr_time = std::chrono::system_clock::now();
-      float t = std::chrono::duration<float>(curr_time - timer).count();// time from start
-	  glm::vec2 mouse =  osWindow.get()->mouse.freePos;	
+      float t = std::chrono::duration<float>(curr_time - timer).count();// from the timer value
+
       currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(t), &t);
       currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 8, sizeof(resolution), &resolution);
       currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 16, sizeof(mouse), &mouse);
@@ -186,7 +213,9 @@ void App::drawFrame()
         vk::PipelineStageFlagBits2::eTransfer,
         vk::AccessFlagBits2::eTransferRead,
         vk::ImageLayout::eTransferSrcOptimal,
-        vk::ImageAspectFlagBits::eColor);
+        vk::ImageAspectFlagBits::eColor
+      );
+
       etna::flush_barriers(currentCmdBuf);
 
       //Make a blit from your new image into a swap chain image
@@ -202,7 +231,16 @@ void App::drawFrame()
         {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
         std::array{Origin, Off}
       };
-      currentCmdBuf.blitImage(image.get(), vk::ImageLayout::eTransferSrcOptimal, backbuffer, vk::ImageLayout::eTransferDstOptimal, Blit, vk::Filter::eLinear);
+
+      currentCmdBuf.blitImage(
+          image.get(), 
+          vk::ImageLayout::eTransferSrcOptimal, 
+          backbuffer, 
+          vk::ImageLayout::eTransferDstOptimal, 
+          Blit, 
+          vk::Filter::eLinear
+      );
+
 
       // At the end of "rendering", we are required to change how the pixels of the
       // swpchain image are laid out in memory to something that is appropriate
