@@ -81,7 +81,7 @@ App::App()
   // TODO: Initialize any additional resources you require here!
   
   //Load the shader toy.com and create a compute pipeline to run it.
-  etna::create_program("ls1_compute", {LOCAL_SHADERTOY_SHADERS_ROOT "toy.comp.spv"});
+  etna::create_program("ls1_compute", {LOCAL_SHADERTOY2_SHADERS_ROOT "toy.comp.spv"});
   pipeline = context->getPipelineManager().createComputePipeline("ls1_compute", {});
   //Create a new image to record the shader result .
   image = context->createImage(etna::Image::CreateInfo{

@@ -1,0 +1,241 @@
+#version 430
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0, rgba8) uniform image2D resultImage;
+
+layout(push_constant) uniform UBO
+{
+  float iTime;
+  layout(offset = 8) ivec2 resolution;
+  layout(offset = 16) vec2 mouse;
+} pushConstant;
+
+
+#define NUM_LIGHT_SOURCES 3
+#define MAX_SHADOWS_STEPS 60
+#define MAX_MARCHING_STEPS 80
+#define MARCH_STEP_COEF 0.5
+#define MIN_DIST 0.0
+#define MAX_DIST 8.
+#define SCALE 3.
+
+#define PRECISION 0.001
+#define PI 3.141592
+
+#define iTime  pushConstant.iTime
+
+float sdTorus( vec3 p, vec2 t )
+{
+  vec2 q = vec2(length(p.xz) - t.x, p.y);
+  return length(q) - t.y
+      + 0.04 * sin(20.0*p.y + iTime )
+      + 0.08 * sin(10.0*p.x + iTime )
+      + 0.08 * sin(5.0*p.z + iTime * 2.); // not SDF
+}
+float sdPlane( vec3 p, vec3 n, float h )
+{
+  return dot(p,n) + h;
+}
+
+mat3 rotateX(float theta) {
+    float c = cos(theta);
+    float s = sin(theta);
+    return mat3(
+        vec3(1, 0, 0),
+        vec3(0, c, -s),
+        vec3(0, s, c)
+    );
+}
+mat3 rotateY(float theta) {
+    float c = cos(theta);
+    float s = sin(theta);
+    return mat3(
+        vec3(c, 0, s),
+        vec3(0, 1, 0),
+        vec3(-s, 0, c)
+    );
+}
+mat3 rotateZ(float theta) {
+    float c = cos(theta);
+    float s = sin(theta);
+    return mat3(
+        vec3(c, -s, 0),
+        vec3(s, c, 0),
+        vec3(0, 0, 1)
+    );
+}
+
+struct Material
+{
+    vec3 color;
+    float k_ambient; //main color
+    float k_diffusion;
+    float k_specular;
+    float metal; // degree of spec
+    float reflex; // reflex coef
+};
+
+struct Light
+{
+    vec3 color;
+    vec3 pos;
+};
+
+// operations
+vec2 Union( vec2 d1, vec2 d2 )
+{
+	return (d1.x < d2.x) ? d1 : d2;
+}
+vec2 smoothSubtraction ( vec2 d1, vec2 d2, float k ) 
+{
+    float h = clamp( 0.5 - 0.5*(d1.x + d2.x) / k, 0.0, 1.0 );
+    return vec2(mix( d1.x, -d2.x, h ) + k * h * (1.0 - h), d1.y); 
+}
+vec2 smoothUnion ( vec2 d1, vec2 d2, float k ) 
+{
+    float h = clamp( 0.5 + 0.5 * (d2.x - d1.x) / k, 0.0, 1.0 );
+    return vec2(mix( d2.x, d1.x, h ) - k * h * (1.0 - h), d2.y); 
+}
+
+//scene
+vec2 map(vec3 p)
+{
+    mat3 rot = rotateX(iTime * 0.2)*rotateY(iTime * 0.1)*rotateZ(iTime * 0.1);
+    vec2 res = vec2( 1e2, 0.0 ); // second component - material id of object
+    
+    float m_id1 = 1., m_id2 = 2.;
+    float smooth_coef1 = .8, smooth_coef2 = .2;
+    
+    res = smoothUnion (res, vec2(sdPlane(p - vec3(0., 0., -SCALE - 0.1), vec3(0., 0., 1.), 0.), m_id1), smooth_coef1);
+    res = smoothUnion (res, vec2(sdPlane(p - vec3(0., -SCALE - 0.1, 0.), vec3(0., 1., 0.), 0.), m_id1), smooth_coef1);
+    res = smoothUnion (res, vec2(sdPlane(p - vec3(-SCALE - 0.1, 0., 0.), vec3(1., 0., 0.), 0.), m_id1), smooth_coef1);
+    
+    res = Union (res, vec2(sdTorus(p * rot , vec2(.5, .3)), m_id2));
+    res = smoothSubtraction(res, vec2(sdTorus(p - vec3(-0.2, 0.3, -0.3), vec2(.5, .3)), m_id2 ), smooth_coef2);
+    
+    return res;
+}
+
+vec3 generateNormal ( vec3 p)
+{
+    float e = PRECISION;
+    float dx = map(p + vec3(e, 0, 0)).x - map(p - vec3(e, 0, 0)).x;
+    float dy = map(p + vec3(0, e, 0)).x - map(p - vec3(0, e, 0)).x;
+    float dz = map(p + vec3(0, 0, e)).x - map(p - vec3(0, 0, e)).x;   
+    return normalize ( vec3 ( dx, dy, dz ) );
+}
+
+vec2 rayMarch( vec3 ro,  vec3 rd) {
+  vec2 depth = vec2(MIN_DIST, 0.);
+  vec2 d = vec2(0.);
+  for (int i = 0; i < MAX_MARCHING_STEPS; ++i) {
+    vec3 p = ro + depth.x * rd;
+    d = map(p);
+    depth.x += d.x * MARCH_STEP_COEF;
+    if (d.x < PRECISION || depth.x > MAX_DIST) 
+        break;
+  }
+  depth.y = d.y;
+  return depth;
+}
+
+float softShadow(in vec3 ro, in vec3 rd, float mint, float w)
+{
+    float res = 1.0;
+    float t = mint;
+    for( int i = 0; i < MAX_SHADOWS_STEPS && t < MAX_DIST; ++i )
+    {
+        float h = map(ro + t * rd).x;
+        if( h < PRECISION )
+            return 0.0;
+        res = min( res, h / (t * w) );
+        t += clamp(h, 0.01, 0.2);
+    }
+    return res;
+}
+
+vec3 getColor(vec2 res, vec3 p, vec3 ro, vec3 b_color, Light lightArray[NUM_LIGHT_SOURCES])
+{
+    Material m;
+    if (res.y < 2.)
+       m = Material(b_color, .7, .3, 0., 0., 0.);
+    else
+       m = Material(vec3(1., 1., 1.), .1, .2, .6, 60.,  .4);
+    
+    vec3 diffusion_color = vec3(0.);
+    vec3 specular_color = vec3(0.);
+    
+    vec3 normal = generateNormal(p);
+    
+    for(int i = 0; i < lightArray.length(); ++i){
+        vec3 lightDirection = normalize(lightArray[i].pos - p);
+        vec3  h  = normalize ( lightDirection + normalize( ro - p ) );
+
+        float softShadow = softShadow(p, lightDirection, .01, .03);
+        
+        float diffusion = clamp(dot(normal, lightDirection), 0., 1.) * softShadow;
+        float specular = pow(max( 0., dot(h, normal)), m.metal) * softShadow;
+        
+        diffusion_color += diffusion * lightArray[i].color;
+        specular_color += specular * lightArray[i].color;
+    }
+
+    float reflex = m.reflex * (1. - dot(normal, normalize(ro - p)));
+    
+    return m.k_ambient * m.color + //main color
+        m.k_diffusion * diffusion_color  + //diffusion
+        m.k_specular * specular_color + // phong
+        reflex * b_color; // reflex from the background
+}
+
+vec3 render( vec3 ro, vec3 rd)
+{
+    Light lightArray[NUM_LIGHT_SOURCES] = Light[NUM_LIGHT_SOURCES](
+        Light( vec3(0., 1., 0.), vec3(0., MAX_DIST, 0.) ),
+        Light( vec3(0., 0., 1.), vec3(0., 0., MAX_DIST) ),
+        Light( vec3(1., 0., 0.), vec3(MAX_DIST, 0., 0.) )
+        );
+        
+    vec3 col = vec3(.7, .4, 0.1); // background color
+    
+    vec2 res = rayMarch(ro, rd); 
+    if (res.x < MAX_DIST) // if hit
+    {
+        vec3 p = (ro + rd * res.x);
+        col = getColor(res, p, ro, col, lightArray);
+    }
+    return col;
+}
+
+mat3 camera(vec3 cameraPos) {
+    vec3 cd = normalize( - cameraPos); 
+    vec3 cr = normalize(cross(vec3(0, 1, 0), cd)); 
+    vec3 cu = normalize(cross(cd, cr)); 
+    return mat3(-cr, cu, -cd);
+}
+
+void main()
+{
+  ivec2 iuv = ivec2(gl_GlobalInvocationID.xy) ;
+
+  vec2 iResolution = vec2(pushConstant.resolution);
+  vec2 iMouse = pushConstant.mouse / iResolution;
+
+  // uv coordinates  
+  vec2 uv = (vec2(iuv) - .5 * iResolution) / iResolution.y;
+  uv.y *= -1.;
+
+  // camera
+  vec3 ro = vec3(0., 0., SCALE); //camera position  
+  ro = ro * rotateX(mix(-PI/2., PI/2., iMouse.y)) * rotateY(mix(-PI, PI, iMouse.x ));
+  vec3 rd = camera(ro) * normalize(vec3(uv, -1.));
+
+  vec3 color = render(ro, rd);
+ 
+
+  imageStore(resultImage, iuv, vec4(color, 1));
+  
+}
+
+
