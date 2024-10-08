@@ -207,7 +207,7 @@ Material getMaterial(float id, vec3 p)
            vec3(0.9), //F0
            getTexture(p * rot, 4.).rgb, //base_color
            0.3, //roughness
-           0.9, //reflectance
+           0.7, //reflectance
            2. //gamma
        );
 }
@@ -280,7 +280,7 @@ void main() {
     vec2 Mouse = vec2(iMouse) / vec2(iResolution);
 
     vec3 ro = vec3(0., 0., SCALE);
-    ro = ro * rotateX(mix(-PI/2., PI/2., Mouse.y)) * rotateY(mix(-PI, PI, Mouse.x ));
+    ro = ro * rotateX(mix(0., -PI/3., -Mouse.y)) * rotateY(mix(-PI, PI, Mouse.x ));
     vec3 rd = camera(ro) * normalize(vec3(uv, -1.));
 
     outColor = vec4(render(uv, ro, rd), 1.);

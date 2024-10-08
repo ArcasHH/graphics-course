@@ -51,46 +51,57 @@ App::App()
 
 
   // TODO: Initialize any additional resources you require here!
-
   
-  etna::create_program(
-    "texture", 
-    {LOCAL_SHADERTOY2_SHADERS_ROOT "toy.comp.spv"
-  });
-
-  texturePipeline = etna::get_context().getPipelineManager().createComputePipeline("texture", {});
-
-  image = context->createImage(etna::Image::CreateInfo{
-     .extent = vk::Extent3D{resolution.x, resolution.y, 1},
-     .name = "ls_image",
-     .format = vk::Format::eR8G8B8A8Unorm,
-     .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
-  });  
-
-  textureSampler = etna::Sampler{ etna::Sampler::CreateInfo{
-      .addressMode = vk::SamplerAddressMode::eMirroredRepeat, 
-      .name = "textureSampler"
-  } };
-
-  
-  etna::create_program("ls2", {
-      LOCAL_SHADERTOY2_SHADERS_ROOT "toy.frag.spv",
-      LOCAL_SHADERTOY2_SHADERS_ROOT "toy.vert.spv"
-      }
-  );
-
-  graphicsPipeline = context->getPipelineManager().createGraphicsPipeline(
-      "ls2",
-      etna::GraphicsPipeline::CreateInfo{
-          .fragmentShaderOutput = {.colorAttachmentFormats = {vk::Format::eB8G8R8A8Srgb}}
-      });
-
-  defaultSampler = etna::Sampler{ etna::Sampler::CreateInfo{
-        .name = "default_sampler"
-  } };
-
+  initialize();
 
   timer = std::chrono::system_clock::now();
+}
+
+void App::initialize()
+{
+    // texture
+    etna::create_program(
+        "texture", 
+        {
+            LOCAL_SHADERTOY2_SHADERS_ROOT "texture.frag.spv",
+            LOCAL_SHADERTOY2_SHADERS_ROOT "toy.vert.spv"
+        }
+    );
+
+    texturePipeline = etna::get_context().getPipelineManager().createGraphicsPipeline(
+        "texture",
+        etna::GraphicsPipeline::CreateInfo{
+            .fragmentShaderOutput = {.colorAttachmentFormats = {vk::Format::eB8G8R8A8Srgb},}
+        }
+    );
+
+    textureSampler = etna::Sampler{ etna::Sampler::CreateInfo{
+        .addressMode = vk::SamplerAddressMode::eMirroredRepeat, 
+        .name = "textureSampler"
+    }};
+  
+    image = context->createImage(etna::Image::CreateInfo{
+        .extent = vk::Extent3D{resolution.x, resolution.y, 1},
+        .name = "texture_image",
+        .format = vk::Format::eB8G8R8A8Srgb,
+        .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment 
+    });  
+
+  // main shader
+    etna::create_program(
+        "ls2", 
+        {
+            LOCAL_SHADERTOY2_SHADERS_ROOT "toy.frag.spv",
+            LOCAL_SHADERTOY2_SHADERS_ROOT "toy.vert.spv"
+        }
+    );
+
+    graphicsPipeline = context->getPipelineManager().createGraphicsPipeline(
+        "ls2",
+        etna::GraphicsPipeline::CreateInfo{
+            .fragmentShaderOutput = {.colorAttachmentFormats = {vk::Format::eB8G8R8A8Srgb}
+        }
+    });
 }
 
 App::~App()
@@ -151,92 +162,65 @@ void App::drawFrame()
     {
       auto curr_time = std::chrono::system_clock::now();
 
+      etna::set_state(
+        currentCmdBuf,
+        image.get(),
+        vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        vk::AccessFlagBits2::eColorAttachmentWrite,
+        vk::ImageLayout::eColorAttachmentOptimal,
+        vk::ImageAspectFlagBits::eColor
+      );
+      etna::flush_barriers(currentCmdBuf);
+
+
       {
+          etna::RenderTargetState state(
+              currentCmdBuf,
+              {{}, {resolution.x, resolution.y}},
+              {{image.get(), image.getView({})}},
+              {}
+          );
+          currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, texturePipeline.getVkPipeline());
+         
           struct Params{
               glm::uvec2 res;
               float time;
           };
-          Params params{
-            .res = resolution,
-            .time = std::chrono::duration<float>(curr_time - timer).count()
-          };
-      
-          etna::set_state(
-            currentCmdBuf,
-            backbuffer,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::ImageLayout::eColorAttachmentOptimal,
-            vk::ImageAspectFlagBits::eColor
-          );
+          Params params{ resolution, std::chrono::duration<float>(curr_time - timer).count() };
+          currentCmdBuf.pushConstants(texturePipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(params), &params);
 
-          etna::flush_barriers(currentCmdBuf);
-        
-          auto textureInfo = etna::get_shader_program("texture");
-          auto set = etna::create_descriptor_set(
-              textureInfo.getDescriptorLayoutId(0),
-              currentCmdBuf,
-              {
-                 etna::Binding{0, image.genBinding(textureSampler.get(), vk::ImageLayout::eGeneral)}
-              });
-
-          vk::DescriptorSet vkSet = set.getVkSet();
-
-          currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, texturePipeline.getVkPipeline());
-
-          currentCmdBuf.bindDescriptorSets( 
-              vk::PipelineBindPoint::eCompute, 
-              texturePipeline.getVkPipelineLayout(), 
-              0, 
-              1, 
-              &vkSet, 
-              0, 
-              nullptr
-          );
-
-          currentCmdBuf.pushConstants(texturePipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(params), &params);
-
-          etna::flush_barriers(currentCmdBuf);
-      
-          currentCmdBuf.dispatch((resolution.x + 31)/ 32, (resolution.y + 31)/ 32, 1);
+          currentCmdBuf.draw(3, 1, 0, 0);
       }
-      
 
 
       etna::set_state(
         currentCmdBuf,
         image.get(),
         vk::PipelineStageFlagBits2::eFragmentShader,
-        vk::AccessFlagBits2::eShaderSampledRead,
+        vk::AccessFlagBits2::eShaderRead,
         vk::ImageLayout::eShaderReadOnlyOptimal,
         vk::ImageAspectFlagBits::eColor
       );
-
       etna::flush_barriers(currentCmdBuf);
 
      
       {
-          struct Params{
-              glm::uvec2 res;
-              glm::uvec2 mouse;
-              float time;
-          
+          etna::RenderTargetState state{
+          currentCmdBuf,
+              {{}, {resolution.x, resolution.y}},
+              {{backbuffer, backbufferView}},
+              {}
           };
-          Params params{
-            .res = resolution,
-            .mouse = mouse,
-            .time = std::chrono::duration<float>(curr_time - timer).count()
-          };
-          etna::RenderTargetState state{ currentCmdBuf, {{},{resolution.x, resolution.y}}, {{backbuffer, backbufferView}}, {} };
-
+         
           auto ls2Info = etna::get_shader_program("ls2");
 
           auto set = etna::create_descriptor_set(
               ls2Info.getDescriptorLayoutId(0),
               currentCmdBuf,
               {
-                  etna::Binding{0, image.genBinding(textureSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
-              } );
+                  etna::Binding{ 0, image.genBinding(textureSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+              }
+          );
 
           vk::DescriptorSet vkSet = set.getVkSet();
           currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getVkPipeline());
@@ -247,12 +231,20 @@ void App::drawFrame()
               1, 
               &vkSet, 
               0, 
+
               nullptr
           );
-      
-          currentCmdBuf.pushConstants(graphicsPipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(params), &params);
 
-          currentCmdBuf.draw(3, 1, 0, 0);
+          
+        struct Params{
+            glm::uvec2 res;
+            glm::uvec2 mouse;
+            float time;
+        };
+        Params params{ resolution, mouse, std::chrono::duration<float>(curr_time - timer).count()};
+        currentCmdBuf.pushConstants(graphicsPipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(params), &params);
+
+        currentCmdBuf.draw(3, 1, 0, 0);
       }  
 
       etna::set_state(

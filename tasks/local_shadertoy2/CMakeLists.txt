@@ -11,4 +11,5 @@ target_add_shaders(local_shadertoy2
   shaders/toy.comp
   shaders/toy.vert
   shaders/toy.frag
+  shaders/texture.frag
 )

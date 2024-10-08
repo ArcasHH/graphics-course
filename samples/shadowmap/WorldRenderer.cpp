@@ -208,7 +208,8 @@ void WorldRenderer::renderWorld(
       cmd_buf,
       {{0, 0}, {2048, 2048}},
       {},
-      {.image = shadowMap.get(), .view = shadowMap.getView({})});
+      {.image = shadowMap.get(), .view = shadowMap.getView({})}
+    );
 
     cmd_buf.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline.getVkPipeline());
     renderScene(cmd_buf, lightMatrix, shadowPipeline.getVkPipelineLayout());
