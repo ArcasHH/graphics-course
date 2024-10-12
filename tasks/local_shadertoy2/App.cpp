@@ -5,6 +5,11 @@
 #include <etna/PipelineManager.hpp>
 #include <chrono>
 #include <etna/RenderTargetStates.hpp>
+#include <etna/BlockingTransferHelper.hpp>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 
 App::App()
   : resolution{1280, 720}
@@ -57,9 +62,51 @@ App::App()
   timer = std::chrono::system_clock::now();
 }
 
+static etna::Image createTexture() {
+    int texWidth, texHeight, texChannels;
+
+    stbi_uc* pixels = stbi_load(
+        LOCAL_SHADERTOY2_SHADERS_ROOT "../textures/test_tex_1.png",
+        &texWidth,
+        &texHeight,
+        &texChannels,
+        STBI_rgb_alpha
+    );
+
+    VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+    if (!pixels) {
+        throw std::runtime_error("failed to load texture image!");
+    }
+
+    etna::Image texture = etna::get_context().createImage(etna::Image::CreateInfo{
+        .extent = vk::Extent3D{static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), 1},
+        .name = "texture",
+        .format = vk::Format::eR8G8B8A8Unorm,
+        .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst
+        }
+    );
+
+    std::unique_ptr<etna::OneShotCmdMgr> oneShotCmdMgr = etna::get_context().createOneShotCmdMgr();
+
+    auto blockingTransferHelper = etna::BlockingTransferHelper{
+        etna::BlockingTransferHelper::CreateInfo{.stagingSize = static_cast<std::uint64_t>(imageSize)}
+    };
+    blockingTransferHelper.uploadImage(
+        *oneShotCmdMgr, 
+        texture, 
+        0, 
+        0,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixels), imageSize)
+    );
+
+    stbi_image_free(pixels);
+    return texture;
+}
+
 void App::initialize()
 {
-    // texture
+    //generated texture
     etna::create_program(
         "texture", 
         {
@@ -99,9 +146,11 @@ void App::initialize()
     graphicsPipeline = context->getPipelineManager().createGraphicsPipeline(
         "ls2",
         etna::GraphicsPipeline::CreateInfo{
-            .fragmentShaderOutput = {.colorAttachmentFormats = {vk::Format::eB8G8R8A8Srgb}
+                .fragmentShaderOutput = {.colorAttachmentFormats = {vk::Format::eB8G8R8A8Srgb}}
         }
-    });
+    );
+
+    texture = createTexture();
 }
 
 App::~App()
@@ -218,7 +267,8 @@ void App::drawFrame()
               ls2Info.getDescriptorLayoutId(0),
               currentCmdBuf,
               {
-                  etna::Binding{ 0, image.genBinding(textureSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+                  etna::Binding{ 0, image.genBinding(textureSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+                  etna::Binding{ 1, texture.genBinding(textureSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
               }
           );
 
@@ -234,8 +284,7 @@ void App::drawFrame()
 
               nullptr
           );
-
-          
+  
         struct Params{
             glm::uvec2 res;
             glm::uvec2 mouse;

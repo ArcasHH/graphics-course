@@ -11,8 +11,6 @@
 #include <etna/GlobalContext.hpp>
 #include <etna/Sampler.hpp>
 
-#include <render_utils/shaders/cpp_glsl_compat.h>
-#include <stb_image.h>
 
 class App
 {
@@ -46,6 +44,7 @@ private:
 
   etna::Sampler textureSampler;
 
-  void initialize();
+  etna::Image texture;
 
+  void initialize();
 };

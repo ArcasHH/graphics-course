@@ -2,7 +2,8 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(location = 0) out vec4 outColor;
-layout(binding = 0) uniform sampler2D colorTex;
+layout(binding = 0) uniform sampler2D iChannel1;
+layout(binding = 1) uniform sampler2D iChannel2;
 
 layout(push_constant) uniform params {
   uvec2 iResolution;
@@ -15,13 +16,13 @@ layout(push_constant) uniform params {
 #define MAX_MARCHING_STEPS 120
 #define MARCH_STEP_COEF 0.7
 #define MIN_DIST 0.0
-#define MAX_DIST 6.
+#define MAX_DIST 8.
 #define SCALE 3.
 
 #define EPS 0.001
 #define PI 3.141592
 
-float sdTorus( vec3 p, vec2 t )
+float Torus( vec3 p, vec2 t )
 {
   vec2 q = vec2(length(p.xz) - t.x, p.y);
   return length(q) - t.y
@@ -29,6 +30,13 @@ float sdTorus( vec3 p, vec2 t )
       + 0.08 * sin(10.0*p.x + iTime )
       + 0.08 * sin(5.0*p.z + iTime);
 }
+
+float sdTorus( vec3 p, vec2 t )
+{
+  vec2 q = vec2(length(p.xz)-t.x,p.y);
+  return length(q)-t.y;
+}
+
 float sdPlane( vec3 p, vec3 n, float h )
 {
   return dot(p,n) + h;
@@ -85,10 +93,16 @@ vec2 Union( vec2 d1, vec2 d2 )
 {
 	return (d1.x < d2.x) ? d1 : d2;
 }
+
+vec2 smoothUnion( vec2 d1, vec2 d2, float k )
+{
+    float h = clamp( 0.5 + 0.5*(d2.x-d1.x)/k, 0.0, 1.0 );
+    return vec2( mix( d2.x, d1.x, h ) - k * h * (1.0 - h), d1.y);
+}
 vec2 smoothSubtraction ( vec2 d1, vec2 d2, float k ) 
 {
     float h = clamp( 0.5 - 0.5*(d1.x + d2.x) / k, 0.0, 1.0 );
-    return vec2(mix( d1.x, -d2.x, h ) + k * h * (1.0 - h), d1.y); 
+    return vec2( mix( d1.x, -d2.x, h ) + k * h * (1.0 - h), d1.y); 
 }
 
 
@@ -96,15 +110,18 @@ vec2 smoothSubtraction ( vec2 d1, vec2 d2, float k )
 vec2 map(vec3 p)
 {
     mat3 rot = rotateX(iTime * 0.2)*rotateY(iTime * 0.1)*rotateZ(iTime * 0.1);
+    mat3 rot2 = rotateX( 0.2)*rotateY(iTime * 0.1)*rotateZ( 0.1);
     vec2 res = vec2( MAX_DIST, 0.0 ); // second component - material id of object
     
     float m_id1 = 1., m_id2 = 2.;
     float smooth_coef1 = .8, smooth_coef2 = 0.3;
     
     res = Union (res, vec2(sdPlane(p - vec3(0., -1.1, 0.), vec3(0., 1., 0.), 0.), m_id1));
+
+    res = smoothUnion (res, vec2(sdTorus((p - vec3(0., -1., 0.)) * rot2 , vec2(3., .1)), m_id2), smooth_coef1);
     
-    res = Union (res, vec2(sdTorus((p - vec3(0.2, 0., 0.2)) * rot, vec2(.5, .3)), m_id2));
-    res = smoothSubtraction(res, vec2(sdTorus(p - vec3(0.5, 0., 0.5), vec2(.5, .3)), m_id2 ), smooth_coef2);
+    res = Union (res, vec2(Torus((p - vec3(0.2, 0., 0.2)) * rot, vec2(.5, .3)), m_id2));
+    res = smoothSubtraction(res, vec2(Torus(p - vec3(0.5, 0., 0.5), vec2(.5, .3)), m_id2 ), smooth_coef2);
     
     return res;
 }
@@ -178,12 +195,12 @@ vec4 cookTorrance ( Material m, in vec3 n, in vec3 l, in vec3 v, in vec3 l_color
 	return vec4 ( pow ( diff + ct, vec3 ( 1.0 / (m.gamma + EPS) ) ), 1.0 );
 }
 
-vec4 getTexture(vec3 p, float k)
-{
-    vec3 w = abs(generateNormal(p));
-    return  pow(w.x, k) * textureLod(colorTex, vec2(0.5) + p.yz, 0).rgba +
-        pow(w.y, k) * textureLod(colorTex, vec2(0.5) + p.xz, 0).rgba + 
-        pow(w.z, k) * textureLod(colorTex, vec2(0.5) + p.xy, 0).rgba;
+vec3 getTexture(in sampler2D channel, vec3 p, vec3 n,  float k, float scale) {
+  vec3 w = abs(n);
+  return 
+      pow(w.x, k) * texture(channel, p.yz * scale).rgb + 
+      pow(w.y, k) * texture(channel, p.xz * scale).rgb +
+      pow(w.z, k) * texture(channel, p.xy * scale).rgb;
 }
 
 Material getMaterial(float id, vec3 p)
@@ -195,7 +212,8 @@ Material getMaterial(float id, vec3 p)
         vec3 p_ = vec3(p.x*0.4, p.y, p.z*0.4);
         return Material(
            vec3(0.04), //F0
-           vec3(0.5 * mod(floor(p.x * 5.) + floor(p.z * 5.), 2.0)), //base_color
+           //vec3(0.5 * mod(floor(p.x * 5.) + floor(p.z * 5.), 2.0)), //base_color
+           getTexture(iChannel2, p, generateNormal(p), 4., .2).ggg, //base_color
            .8, //roughness
            .8, //reflectance
            1. //gamma
@@ -205,14 +223,14 @@ Material getMaterial(float id, vec3 p)
     else
        return Material(
            vec3(0.9), //F0
-           getTexture(p * rot, 4.).rgb, //base_color
-           0.3, //roughness
+           getTexture(iChannel1, p * rot, generateNormal(p * rot), 4., 1.), //base_color
+           0.5, //roughness
            0.7, //reflectance
-           2. //gamma
+           3. //gamma
        );
 }
 
-vec4 Cubemap(in vec2 fragCoord, in vec3 rayOri, in vec3 rayDir )
+vec4 Cubemap(in vec2 fragCoord, in vec3 rayDir, in vec3 n )
 {
     rayDir = normalize(rayDir);
     vec3 col = vec3(0.);
@@ -223,12 +241,12 @@ vec4 Cubemap(in vec2 fragCoord, in vec3 rayOri, in vec3 rayDir )
     else if(abs(rayDir.z) > 0.7 || abs(rayDir.z) <0.1)
         col = vec3(0.1);
     else 
-        col = vec3(0.,0.2,0.2);
+        col = vec3(0.);
 
     col += (-rayDir) * rayDir * rayDir;
     if(abs(rayDir.z) < 0.8)
         col *= 0.3;
-    return vec4(col * 0.6, 1.0);
+    return vec4(col * 0.4, 1.0);
 }
 
 vec3 getColor(vec2 res, vec3 p, vec3 ro, Light lightArray[NUM_LIGHT_SOURCES])
@@ -242,7 +260,7 @@ vec3 getColor(vec2 res, vec3 p, vec3 ro, Light lightArray[NUM_LIGHT_SOURCES])
     for(int i = 0; i < lightArray.length(); ++i){
         vec3 l = normalize(lightArray[i].pos - p); // light direction
         float shadow = 1.; 
-        vec3 b_color = Cubemap(uv, ro, reflect(p - ro, n)).rgb;
+        vec3 b_color = Cubemap(uv, reflect(p - ro, n) , n ).rgb;
         color += cookTorrance(m, n, l, v, lightArray[i].color * lightArray[i].intensity, b_color ).xyz * shadow; 
     }   
     return color;
@@ -256,7 +274,8 @@ vec3 render( vec2 uv, vec3 ro, vec3 rd)
         );
         
     //vec3 col = texture(iChannel0, rd).rgb; // background color
-    vec3 col = Cubemap(uv, ro, rd).rgb;
+    vec3 col = Cubemap(uv, rd, rd).rgb;
+    
 
     vec2 res = rayMarch(ro, rd); 
     if (res.x < MAX_DIST) // if hit
@@ -280,8 +299,8 @@ void main() {
     vec2 Mouse = vec2(iMouse) / vec2(iResolution);
 
     vec3 ro = vec3(0., 0., SCALE);
-    ro = ro * rotateX(mix(0., -PI/3., -Mouse.y)) * rotateY(mix(-PI, PI, Mouse.x ));
+    ro = ro * rotateX(mix(0., -PI/3., Mouse.y)) * rotateY(mix(-PI, PI, Mouse.x ));
     vec3 rd = camera(ro) * normalize(vec3(uv, -1.));
 
-    outColor = vec4(render(uv, ro, rd), 1.);
+    outColor = vec4(render(uv, ro, normalize(rd)), 1.);
 }
