@@ -66,7 +66,7 @@ static etna::Image createTexture() {
     int texWidth, texHeight, texChannels;
 
     stbi_uc* pixels = stbi_load(
-        LOCAL_SHADERTOY2_SHADERS_ROOT "../textures/test_tex_1.png",
+        GRAPHICS_COURSE_RESOURCES_ROOT "/textures/test_tex_1.png",
         &texWidth,
         &texHeight,
         &texChannels,
@@ -174,7 +174,7 @@ void App::processInput()
     if (osWindow.get()->mouse[MouseButton::mbRight] == ButtonState::Rising )
     {
         const int retval = std::system("cd " GRAPHICS_COURSE_ROOT "/build"
-                                            " && cmake --build . --target local_shadertoy_shaders");
+                                            " && cmake --build . --target local_shadertoy2_shaders");
         if (retval != 0)
             spdlog::warn("Shader recompilation returned a non-zero return code!");
         else
