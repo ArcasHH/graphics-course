@@ -69,7 +69,7 @@ static etna::Image createTexture() {
     int texWidth, texHeight, texChannels;
 
     stbi_uc* pixels = stbi_load(
-        INFLIGHT_FRAMES_SHADERS_ROOT "../textures/test_tex_1.png",
+        GRAPHICS_COURSE_RESOURCES_ROOT "/textures/test_tex_1.png",
         &texWidth,
         &texHeight,
         &texChannels,
