@@ -11,8 +11,12 @@ int main(int argc, char* argv[])
 
   std::filesystem::path path = std::filesystem::path(argv[1]);
 
+  spdlog::info("run baker for " + path.filename().string());
+
   Baker baker{};
   baker.bakeScene(path);
+
+  spdlog::info( "model baked" );
 
   return 0;
 }

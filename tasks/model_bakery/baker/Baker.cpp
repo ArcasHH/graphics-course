@@ -4,8 +4,8 @@
 std::uint32_t encode_normal(glm::vec4 normal)
 {
   union Byte32{
-    uint8_t arr[4];
-    uint32_t val;
+     uint8_t arr[4];
+     uint32_t val;
   }res{};
 
   res.arr[0] = static_cast<uint8_t>(glm::round(normal.x * 127.0));
@@ -18,6 +18,7 @@ std::uint32_t encode_normal(glm::vec4 normal)
 
 std::optional<tinygltf::Model> Baker::loadModel(std::filesystem::path path)
 {
+  loader.SetImagesAsIs(true);
 
   tinygltf::Model model;
 
@@ -247,6 +248,129 @@ Baker::ProcessedMeshes Baker::processMeshes(const tinygltf::Model& model) const
   return result;
 }
 
+void Baker::updateBuffer(std::filesystem::path const bin_path, tinygltf::Model& model, ProcessedMeshes& res_meshs)
+{  
+  std::size_t indsSize = res_meshs.indices.size() * sizeof(uint32_t);
+  std::size_t vertsSize = res_meshs.vertices.size() * sizeof(Vertex);
+
+  tinygltf::Buffer buff;
+  buff.name = bin_path.stem().string();
+  buff.uri = bin_path.filename().string() + "_baked.bin";
+  buff.data.resize(indsSize + vertsSize);
+
+  std::memcpy(buff.data.data(), res_meshs.indices.data(), indsSize);
+  std::memcpy(buff.data.data() + indsSize, res_meshs.vertices.data(), vertsSize);
+
+  model.buffers.clear();
+  model.buffers.push_back(buff);
+}
+
+void Baker::updateBufferView(tinygltf::Model& model, ProcessedMeshes& res_meshs)
+{  
+  std::size_t indsSize = res_meshs.indices.size() * sizeof(uint32_t);
+  std::size_t vertsSize = res_meshs.vertices.size() * sizeof(Vertex);
+
+  tinygltf::BufferView indsBufferView{};
+  tinygltf::BufferView vertsBufferView{};
+
+  indsBufferView.buffer = 0;
+  indsBufferView.byteLength = indsSize;
+  indsBufferView.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
+
+  vertsBufferView.buffer = 0;
+  vertsBufferView.byteOffset = indsSize;
+  vertsBufferView.byteLength = vertsSize;
+  vertsBufferView.byteStride = sizeof(Vertex);
+  vertsBufferView.target = TINYGLTF_TARGET_ARRAY_BUFFER;
+
+  model.bufferViews.clear();
+  model.bufferViews.push_back(indsBufferView);
+  model.bufferViews.push_back(vertsBufferView);
+}
+
+void Baker::updateAccessors(std::vector<tinygltf::Accessor>& new_accessors, tinygltf::Primitive& prim, RenderElement& relem)
+{
+    const auto normalIt = prim.attributes.find("NORMAL");
+    const auto tangentIt = prim.attributes.find("TANGENT");
+    const auto texcoordIt = prim.attributes.find("TEXCOORD_0");
+
+    const bool hasNormals = normalIt != prim.attributes.end();
+    const bool hasTangents = tangentIt != prim.attributes.end();
+    const bool hasTexcoord = texcoordIt != prim.attributes.end();
+
+    prim.attributes.clear();
+
+    std::uint32_t indexOffset = relem.indexOffset;
+    std::uint32_t count = relem.indexCount;
+    size_t offset = relem.vertexOffset * sizeof(Vertex);
+
+    {
+        tinygltf::Accessor inds_accessor{};
+
+        inds_accessor.bufferView = 0;
+        inds_accessor.byteOffset = indexOffset * sizeof(uint32_t);
+        inds_accessor.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
+        inds_accessor.count = count;
+        inds_accessor.type = TINYGLTF_TYPE_SCALAR;
+        
+        prim.indices = static_cast<int>(new_accessors.size());
+        new_accessors.push_back(inds_accessor);
+    }
+
+    {
+        tinygltf::Accessor pos_accessor{};
+        pos_accessor.bufferView = 1;
+        pos_accessor.byteOffset = offset;
+        pos_accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+        pos_accessor.count = count;
+        pos_accessor.type = TINYGLTF_TYPE_VEC3;
+
+        prim.attributes.insert({ "POSITION", static_cast<int>(new_accessors.size()) });
+        new_accessors.push_back(pos_accessor);
+    }
+
+    if(hasNormals)
+    {
+        tinygltf::Accessor normal_accessor{};
+        normal_accessor.bufferView = 1;
+        normal_accessor.byteOffset = offset + 12;
+        normal_accessor.normalized = true;
+        normal_accessor.componentType = TINYGLTF_COMPONENT_TYPE_BYTE;
+        normal_accessor.count = count;
+        normal_accessor.type = TINYGLTF_TYPE_VEC3;   
+
+        prim.attributes.insert({ "NORMAL", static_cast<int>(new_accessors.size()) });
+        new_accessors.push_back(normal_accessor);
+    }
+    
+    if(hasTexcoord)
+    {
+        tinygltf::Accessor texcoord_accessor{};
+        texcoord_accessor.bufferView = 1;
+        texcoord_accessor.byteOffset = offset + 16;
+        texcoord_accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
+        texcoord_accessor.count = count;
+        texcoord_accessor.type = TINYGLTF_TYPE_VEC2;
+
+        prim.attributes.insert({"TEXCOORD_0", static_cast<int>(new_accessors.size())});
+        new_accessors.push_back(texcoord_accessor);
+    }
+
+    if(hasTangents)    
+    {
+        tinygltf::Accessor tangent_accessor{};
+        tangent_accessor.bufferView = 1;
+        tangent_accessor.byteOffset = offset + 24;
+        tangent_accessor.normalized = true;
+        tangent_accessor.componentType = TINYGLTF_COMPONENT_TYPE_BYTE;
+        tangent_accessor.count = count;
+        tangent_accessor.type = TINYGLTF_TYPE_VEC4;
+
+        prim.attributes.insert({"TANGENT", static_cast<int>(new_accessors.size())});
+        new_accessors.push_back(tangent_accessor);
+    }
+}
+
 void Baker::bakeScene(std::filesystem::path path) 
 {
   auto maybeModel = loadModel(path);
@@ -259,10 +383,23 @@ void Baker::bakeScene(std::filesystem::path path)
   model.extensionsRequired.push_back("KHR_mesh_quantization");
   model.extensionsUsed.push_back("KHR_mesh_quantization");
 
-  
   std::filesystem::path model_path = path.parent_path() / path.stem();
-  std::string filename = model_path.string() + "_baked.gltf";
+  updateBuffer(model_path, model, resultMeshes);
+  updateBufferView(model,resultMeshes);
 
+  std::vector<tinygltf::Accessor> new_accessors;
+  for (std::size_t i = 0; i < model.meshes.size(); ++i)
+  {
+     auto& mesh = model.meshes[i];
+     for (std::size_t j = 0; j < mesh.primitives.size(); ++j)
+     {
+        auto& relem = resultMeshes.relems[resultMeshes.meshes[i].firstRelem + j];
+        updateAccessors(new_accessors, mesh.primitives[j], relem);
+     }
+  }
+  model.accessors = std::move(new_accessors);
+
+  std::string filename = model_path.string() + "_baked.gltf";
   saver.SetImagesAsIs(true);
   saver.WriteGltfSceneToFile(&model, filename, false, false, true, false);
 }

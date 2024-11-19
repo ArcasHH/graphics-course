@@ -47,4 +47,8 @@ private:
 private:
   tinygltf::TinyGLTF loader;
   tinygltf::TinyGLTF saver;
+
+  void updateBuffer(std::filesystem::path  bin_path, tinygltf::Model& model,  ProcessedMeshes& res_meshs);
+  void updateBufferView(tinygltf::Model& model, ProcessedMeshes& res_meshs);
+  void updateAccessors(std::vector<tinygltf::Accessor>& new_accessors, tinygltf::Primitive& prim, RenderElement& relem);
 };
