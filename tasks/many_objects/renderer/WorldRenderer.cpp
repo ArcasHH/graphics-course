@@ -33,11 +33,19 @@ void WorldRenderer::loadScene(std::filesystem::path path)
 
 void WorldRenderer::loadShaders()
 {
+#if 0
   etna::create_program(
     "static_mesh_material",
     {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.frag.spv",
      MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.vert.spv"});
   etna::create_program("static_mesh", {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.vert.spv"});
+#else
+    etna::create_program(
+    "static_mesh_material",
+    {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.frag.spv",
+     MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh_baked.vert.spv"});
+  etna::create_program("static_mesh", {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh_baked.vert.spv"});
+#endif
 }
 
 void WorldRenderer::setupPipelines(vk::Format swapchain_format)

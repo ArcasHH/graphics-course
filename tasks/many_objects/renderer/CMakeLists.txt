@@ -7,9 +7,10 @@ add_executable(many_objects_renderer
 )
 
 target_link_libraries(many_objects_renderer
-  PRIVATE glfw etna glm::glm wsi gui scene render_utils)
+  PRIVATE glfw etna glm::glm wsi gui scene render_utils Tracy::TracyClient)
 
 target_add_shaders(many_objects_renderer
   shaders/static_mesh.frag
   shaders/static_mesh.vert
+  shaders/static_mesh_baked.vert
 )
