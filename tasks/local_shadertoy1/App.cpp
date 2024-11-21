@@ -3,11 +3,13 @@
 #include <etna/Etna.hpp>
 #include <etna/GlobalContext.hpp>
 #include <etna/PipelineManager.hpp>
-
+#include <chrono>
 
 App::App()
   : resolution{1280, 720}
   , useVsync{true}
+  , timer{}
+  , mouse{}
 {
   // First, we need to initialize Vulkan, which is not trivial because
   // extensions are required for just about anything.
@@ -37,6 +39,7 @@ App::App()
       .physicalDeviceIndexOverride = {},
       .numFramesInFlight = 1,
     });
+    
   }
 
   // Now we can create an OS window
@@ -72,9 +75,22 @@ App::App()
   // Next, we need a magical Etna helper to send commands to the GPU.
   // How it is actually performed is not trivial, but we can skip this for now.
   commandManager = etna::get_context().createPerFrameCmdMgr();
+  context = &etna::get_context();
 
 
   // TODO: Initialize any additional resources you require here!
+  
+  //Load the shader toy.com and create a compute pipeline to run it.
+  etna::create_program("ls1_compute", {LOCAL_SHADERTOY_SHADERS_ROOT "toy.comp.spv"});
+  pipeline = context->getPipelineManager().createComputePipeline("ls1_compute", {});
+  //Create a new image to record the shader result .
+  image = context->createImage(etna::Image::CreateInfo{
+     .extent = {resolution.x, resolution.y, 1},
+     .name = "ls1",
+     .format = vk::Format::eR8G8B8A8Unorm, // unsigned normalized format 
+     .imageUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+  });  
+  timer = std::chrono::system_clock::now();
 }
 
 App::~App()
@@ -87,13 +103,41 @@ void App::run()
   while (!osWindow->isBeingClosed())
   {
     windowing.poll();
-
+    processInput();
     drawFrame();
   }
 
   // We need to wait for the GPU to execute the last frame before destroying
   // all resources and closing the application.
   ETNA_CHECK_VK_RESULT(etna::get_context().getDevice().waitIdle());
+}
+void App::processInput()
+{
+    // press RMB to restart shader
+    if (osWindow.get()->mouse[MouseButton::mbRight] == ButtonState::Rising )
+    {
+        const int retval = std::system("cd " GRAPHICS_COURSE_ROOT "/build"
+                                            " && cmake --build . --target local_shadertoy_shaders");
+        if (retval != 0)
+            spdlog::warn("Shader recompilation returned a non-zero return code!");
+        else
+        {
+            ETNA_CHECK_VK_RESULT(etna::get_context().getDevice().waitIdle());
+            etna::reload_shaders();
+            spdlog::info("Successfully reloaded shaders!");
+        }
+        timer = std::chrono::system_clock::now();
+    }
+    // press esc to close window   
+    if (osWindow.get()->keyboard[KeyboardKey::kEscape] == ButtonState::Falling) 
+    {
+        osWindow.get()->askToClose();
+    }
+    // hold LBM to rotate camera
+    if (osWindow.get()->mouse[MouseButton::mbLeft] == ButtonState::High )
+    {
+        mouse = osWindow.get()->mouse.freePos;
+    }	
 }
 
 void App::drawFrame()
@@ -139,6 +183,63 @@ void App::drawFrame()
 
 
       // TODO: Record your commands here!
+
+      //Bind image in a shader  
+      auto ls1ComputeInfo = etna::get_shader_program("ls1_compute");
+      auto set = etna::create_descriptor_set(
+          ls1ComputeInfo.getDescriptorLayoutId(0),
+          currentCmdBuf,
+          {
+             etna::Binding{0, image.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)}
+          });
+      vk::DescriptorSet vkSet = set.getVkSet();
+      currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
+      currentCmdBuf.bindDescriptorSets( vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+
+      auto curr_time = std::chrono::system_clock::now();
+      float t = std::chrono::duration<float>(curr_time - timer).count();// from the timer value
+
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(t), &t);
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 8, sizeof(resolution), &resolution);
+      currentCmdBuf.pushConstants(pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 16, sizeof(mouse), &mouse);
+
+      etna::flush_barriers(currentCmdBuf);
+      
+      currentCmdBuf.dispatch(resolution.x / 32 + 1, resolution.y / 32 + 1, 1);
+
+      etna::set_state(
+        currentCmdBuf,
+        image.get(),
+        vk::PipelineStageFlagBits2::eTransfer,
+        vk::AccessFlagBits2::eTransferRead,
+        vk::ImageLayout::eTransferSrcOptimal,
+        vk::ImageAspectFlagBits::eColor
+      );
+
+      etna::flush_barriers(currentCmdBuf);
+
+      //Make a blit from your new image into a swap chain image
+
+      auto x = static_cast<int32_t>(resolution.x);
+      auto y = static_cast<int32_t>(resolution.y);
+      vk::Offset3D Off{ x, y, 1 };
+      vk::Offset3D Origin{ 0, 0, 0 };
+
+      vk::ImageBlit Blit{
+        {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        std::array{Origin, Off},
+        {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        std::array{Origin, Off}
+      };
+
+      currentCmdBuf.blitImage(
+          image.get(), 
+          vk::ImageLayout::eTransferSrcOptimal, 
+          backbuffer, 
+          vk::ImageLayout::eTransferDstOptimal, 
+          Blit, 
+          vk::Filter::eLinear
+      );
 
 
       // At the end of "rendering", we are required to change how the pixels of the

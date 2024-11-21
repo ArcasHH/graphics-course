@@ -3,12 +3,14 @@
 #include <etna/Window.hpp>
 #include <etna/PerFrameCmdMgr.hpp>
 #include <etna/ComputePipeline.hpp>
+#include <etna/GraphicsPipeline.hpp>
 #include <etna/Image.hpp>
 
 #include "wsi/OsWindowingManager.hpp"
 
 #include <etna/GlobalContext.hpp>
 #include <etna/Sampler.hpp>
+
 
 class App
 {
@@ -36,6 +38,13 @@ private:
 
   etna::Image image;
   etna::GlobalContext* context;
-  etna::ComputePipeline pipeline;
-  etna::Sampler defaultSampler;
+
+  etna::GraphicsPipeline texturePipeline{};
+  etna::GraphicsPipeline graphicsPipeline{};
+
+  etna::Sampler textureSampler;
+
+  etna::Image texture;
+
+  void initialize();
 };
