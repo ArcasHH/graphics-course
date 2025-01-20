@@ -6,11 +6,12 @@
 #include <etna/Profiling.hpp>
 #include <glm/ext.hpp>
 
-const std::size_t INST_NUM = 2048; //max 4096
+#include <bitset>
+
+const std::size_t INST_NUM = 4096; //max 4096
 
 WorldRenderer::WorldRenderer()
-    : sceneMgr{ std::make_unique<SceneManager>() },
-    instCount {0}
+    : sceneMgr{ std::make_unique<SceneManager>() }
 {
 }
 
@@ -38,6 +39,8 @@ void WorldRenderer::allocateResources(glm::uvec2 swapchain_resolution)
 void WorldRenderer::loadScene(std::filesystem::path path)
 {
   sceneMgr->selectScene(path);
+  //auto size = sceneMgr->getRenderElements().size();
+  //instCount.assign(size, 0);
 }
 
 void WorldRenderer::loadShaders()
@@ -100,6 +103,29 @@ void WorldRenderer::update(const FramePacket& packet)
   }
 }
 
+static char sgn(bool isNeg) {
+    return 1 - isNeg * 2;
+}
+
+bool isDraw(const std::pair<glm::vec3, glm::vec3>& bounds, const glm::mat4x4& globalTransform)
+{
+  glm::vec3 pos = bounds.first;
+
+  for (int i = 0; i < 8; ++i)
+  {
+      glm::vec4 vertPos;
+      std::bitset<3> search(i);
+      vertPos = glm::vec4(pos + glm::vec3(bounds.second.x * sgn(search[0]), bounds.second.y * sgn(search[1]), bounds.second.z * sgn(search[2])), 1.f);
+
+      vertPos = globalTransform * vertPos;
+
+      float w = abs(vertPos.w * 0.75f); // mul 1.1
+      if (abs(vertPos.x ) < w && abs(vertPos.y) < w)
+        return true;
+  }
+  return false;
+}
+
 void WorldRenderer::renderScene(
   vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm, vk::PipelineLayout pipeline_layout)
 {
@@ -116,9 +142,11 @@ void WorldRenderer::renderScene(
 
   auto meshes = sceneMgr->getMeshes();
   auto relems = sceneMgr->getRenderElements();
+  auto boundBoxes = sceneMgr->getBoundBoxes();
 
   glm::mat4x4* matrices = reinterpret_cast<glm::mat4x4*>(instMatBuffer.data());
 
+  std::vector<uint32_t> instCount{ 0 };
   std::memset(instCount.data(), 0, instCount.size() * sizeof(instCount[0]));
   for (std::size_t instIdx = 0; instIdx < instanceMeshes.size(); ++instIdx)
   {
@@ -130,9 +158,12 @@ void WorldRenderer::renderScene(
     {
       const auto relemIdx = meshes[meshIdx].firstRelem + j;
 
-      instCount[relemIdx]++;
+      if (!isDraw(boundBoxes[relemIdx], glob_tm * instanceMatrix))
+        continue;
       
-      *matrices++ = instanceMatrix;
+      instCount[relemIdx]++;
+      *matrices = instanceMatrix;
+      ++matrices;
     }
   }
 

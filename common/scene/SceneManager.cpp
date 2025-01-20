@@ -46,8 +46,7 @@ std::optional<tinygltf::Model> SceneManager::loadModel(std::filesystem::path pat
   if (!warning.empty())
     spdlog::warn("glTF: {}", warning);
 
-  if (
-    !model.extensions.empty() || !model.extensionsRequired.empty() || !model.extensionsUsed.empty())
+  if (!model.extensions.empty() || !model.extensionsRequired.empty() || !model.extensionsUsed.empty())
     spdlog::warn("glTF: No glTF extensions are currently implemented!");
 
   return model;
@@ -239,6 +238,10 @@ SceneManager::ProcessedMeshes SceneManager::processMeshes(const tinygltf::Model&
         .indexOffset = static_cast<std::uint32_t>(result.indices.size()),
         .indexCount = static_cast<std::uint32_t>(accessors[0]->count),
       });
+      result.boundBoxes.push_back(std::pair{
+          glm::vec3{accessors[1]->maxValues[0], accessors[1]->maxValues[1], accessors[1]->maxValues[2]},
+          glm::vec3{accessors[1]->minValues[0], accessors[1]->minValues[1], accessors[1]->minValues[2]}
+      });
 
       const std::size_t vertexCount = accessors[1]->count;
 
@@ -372,8 +375,6 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesBaked(const tinygltf::M
         break;
       }
     }
-    //result.vertices.reserve(vertexBytes / sizeof(Vertex));
-    //result.indices.reserve(indexBytes / sizeof(std::uint32_t));
     result.vertices.resize(vertexBytes / sizeof(Vertex));
     result.indices.resize(indexBytes / sizeof(std::uint32_t));
     std::memcpy(result.indices.data() , model.buffers.back().data.data(), indexBytes);
@@ -384,6 +385,7 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesBaked(const tinygltf::M
     for (const auto& mesh : model.meshes)
       totalPrimitives += mesh.primitives.size();
     result.relems.reserve(totalPrimitives);
+    result.boundBoxes.reserve(totalPrimitives);
   }
   result.meshes.reserve(model.meshes.size());
   for (const auto& mesh : model.meshes)
@@ -408,6 +410,32 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesBaked(const tinygltf::M
         .indexOffset = static_cast<std::uint32_t>(inds_accessor.byteOffset / sizeof(std::uint32_t)),
         .indexCount = static_cast<std::uint32_t>(inds_accessor.count),
       });
+
+      auto& bufView = model.bufferViews[pos_accessor.bufferView];
+      auto ptr = reinterpret_cast<const std::byte*>(model.buffers[bufView.buffer].data.data()) +
+          bufView.byteOffset + pos_accessor.byteOffset;
+      auto stride = bufView.byteStride != 0
+          ? bufView.byteStride
+          : tinygltf::GetComponentSizeInBytes(pos_accessor.componentType) *
+            tinygltf::GetNumComponentsInType(pos_accessor.type);
+      glm::vec3 min (std::numeric_limits<float>::max());
+      glm::vec3 max (std::numeric_limits<float>::min());
+      for (std::size_t i = 0; i < pos_accessor.count; ++i)
+      {
+        glm::vec3 pos;
+        std::memcpy(&pos, ptr, sizeof(pos));
+
+        min.x = std::min(min.x, pos.x);
+        min.y = std::min(min.y, pos.y);
+        min.z = std::min(min.z, pos.z);
+
+        max.x = std::max(max.x, pos.x);
+        max.y = std::max(max.y, pos.y);
+        max.z = std::max(max.z, pos.z);
+
+        ptr += stride;
+      }
+      result.boundBoxes.emplace_back((max + min)/2.f, (max - min)/2.f);
     }
   }
   return result;
@@ -453,7 +481,10 @@ void SceneManager::selectScene(std::filesystem::path path)
 
   ProcessedMeshes resultMeshes;
   if (path.stem().string().ends_with("_baked"))
+  {
     resultMeshes = processMeshesBaked(model);
+    boundBoxes = std::move(resultMeshes.boundBoxes);
+  }
   else
     resultMeshes = processMeshes(model);
 

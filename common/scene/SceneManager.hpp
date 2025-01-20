@@ -46,6 +46,7 @@ public:
 
   // Every relem is a single draw call
   std::span<const RenderElement> getRenderElements() { return renderElements; }
+  std::span<const std::pair<glm::vec3, glm::vec3>> getBoundBoxes() { return boundBoxes; }
 
   vk::Buffer getVertexBuffer() { return unifiedVbuf.get(); }
   vk::Buffer getIndexBuffer() { return unifiedIbuf.get(); }
@@ -79,6 +80,7 @@ private:
     std::vector<std::uint32_t> indices;
     std::vector<RenderElement> relems;
     std::vector<Mesh> meshes;
+    std::vector<std::pair<glm::vec3, glm::vec3>> boundBoxes; //position of center and half-size of bounding boxes for relems
   };
   ProcessedMeshes processMeshes(const tinygltf::Model& model) const;
   ProcessedMeshes processMeshesBaked(const tinygltf::Model& model) const;
@@ -91,9 +93,12 @@ private:
 
   std::vector<RenderElement> renderElements;
   std::vector<Mesh> meshes;
+  std::vector<std::pair<glm::vec3, glm::vec3>> boundBoxes;
   std::vector<glm::mat4x4> instanceMatrices;
   std::vector<std::uint32_t> instanceMeshes;
 
   etna::Buffer unifiedVbuf;
   etna::Buffer unifiedIbuf;
+
+  std::pair<glm::vec3, glm::vec3> getBoundBoxes(std::span<const Vertex>);
 };
