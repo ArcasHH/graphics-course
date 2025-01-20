@@ -52,4 +52,7 @@ private:
   etna::GraphicsPipeline staticMeshPipeline{};
 
   glm::uvec2 resolution;
+
+  etna::Buffer instMatBuffer;
+  std::vector<std::uint32_t> instCount;
 };

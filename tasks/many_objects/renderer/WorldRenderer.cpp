@@ -6,9 +6,11 @@
 #include <etna/Profiling.hpp>
 #include <glm/ext.hpp>
 
+const std::size_t INST_NUM = 2048; //max 4096
 
 WorldRenderer::WorldRenderer()
-  : sceneMgr{std::make_unique<SceneManager>()}
+    : sceneMgr{ std::make_unique<SceneManager>() },
+    instCount {0}
 {
 }
 
@@ -24,6 +26,13 @@ void WorldRenderer::allocateResources(glm::uvec2 swapchain_resolution)
     .format = vk::Format::eD32Sfloat,
     .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
   });
+
+  instMatBuffer = ctx.createBuffer({
+    .size = INST_NUM * sizeof(glm::mat4x4),
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+  });
+  instMatBuffer.map();
 }
 
 void WorldRenderer::loadScene(std::filesystem::path path)
@@ -40,7 +49,7 @@ void WorldRenderer::loadShaders()
      MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.vert.spv"});
   etna::create_program("static_mesh", {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.vert.spv"});
 #else
-    etna::create_program(
+  etna::create_program(
     "static_mesh_material",
     {MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh.frag.spv",
      MANY_OBJECTS_RENDERER_SHADERS_ROOT "static_mesh_baked.vert.spv"});
@@ -108,20 +117,58 @@ void WorldRenderer::renderScene(
   auto meshes = sceneMgr->getMeshes();
   auto relems = sceneMgr->getRenderElements();
 
+  glm::mat4x4* matrices = reinterpret_cast<glm::mat4x4*>(instMatBuffer.data());
+
+  std::memset(instCount.data(), 0, instCount.size() * sizeof(instCount[0]));
   for (std::size_t instIdx = 0; instIdx < instanceMeshes.size(); ++instIdx)
   {
     pushConst2M.model = instanceMatrices[instIdx];
 
-    cmd_buf.pushConstants<PushConstants>(
-      pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0, {pushConst2M});
-
     const auto meshIdx = instanceMeshes[instIdx];
-
+    const auto& instanceMatrix = instanceMatrices[instIdx ];
     for (std::size_t j = 0; j < meshes[meshIdx].relemCount; ++j)
     {
       const auto relemIdx = meshes[meshIdx].firstRelem + j;
-      const auto& relem = relems[relemIdx];
-      cmd_buf.drawIndexed(relem.indexCount, 1, relem.indexOffset, relem.vertexOffset, 0);
+
+      instCount[relemIdx]++;
+      
+      *matrices++ = instanceMatrix;
+    }
+  }
+
+  {
+      auto staticMesh = etna::get_shader_program("static_mesh");
+
+      auto set = etna::create_descriptor_set(
+        staticMesh.getDescriptorLayoutId(0),
+        cmd_buf,
+        {etna::Binding{0, instMatBuffer.genBinding()}}
+      );
+
+      vk::DescriptorSet vkSet = set.getVkSet();
+      cmd_buf.bindDescriptorSets(
+          vk::PipelineBindPoint::eGraphics, 
+          pipeline_layout, 
+          0, 
+          1, 
+          &vkSet, 
+          0, 
+          nullptr
+      );
+  }
+  
+
+  std::uint32_t firstInstance = 0;
+  for (std::size_t j = 0; j < relems.size(); ++j)
+  {
+    std::uint32_t instanceCount = instCount[j];
+    if (instanceCount != 0)
+    {
+      const auto& relem = relems[j];
+      cmd_buf.pushConstants<PushConstants>(
+        pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0, {pushConst2M});
+      cmd_buf.drawIndexed(relem.indexCount, instanceCount, relem.indexOffset, relem.vertexOffset, firstInstance);
+      firstInstance += instanceCount;
     }
   }
 }
